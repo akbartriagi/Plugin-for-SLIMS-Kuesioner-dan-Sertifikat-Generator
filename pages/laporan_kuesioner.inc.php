@@ -42,11 +42,11 @@ if (!$can_read) {
     die('<div class="errorBox">'.__('You don\'t have enough privileges to access this area!').'</div>');
 }
 
-require SIMBIO.'simbio_GUI/table/simbio_table.inc.php';
-require SIMBIO.'simbio_GUI/paging/simbio_paging.inc.php';
-require SIMBIO.'simbio_GUI/form_maker/simbio_form_element.inc.php';
-require SIMBIO.'simbio_DB/datagrid/simbio_dbgrid.inc.php';
-require SIMBIO.'simbio_DB/simbio_dbop.inc.php';
+require_once SIMBIO.'simbio_GUI/table/simbio_table.inc.php';
+require_once SIMBIO.'simbio_GUI/paging/simbio_paging.inc.php';
+require_once SIMBIO.'simbio_GUI/form_maker/simbio_form_table_AJAX.inc.php';
+require_once SIMBIO.'simbio_DB/datagrid/simbio_dbgrid.inc.php';
+require_once SIMBIO.'simbio_DB/simbio_dbop.inc.php';
 
 if (!function_exists('httpQuery')) {
     function httpQuery($query = []) {
@@ -338,8 +338,8 @@ if ($is_bulk_print || $is_single_print || $is_send_email || $is_bulk_send_email)
             if ($has_template) $pdf->Image($template_path, 0, 0, 297, 210);
             $pdf->SetFont($jenis_font, $current_style, $ukuran_font);
             $pdf->SetTextColor($r, $g, $b);
-            $pdf->SetXY($pos_x, $pos_y);
-            $pdf->Cell(0, 10, $last_nama, 0, 0, 'L');
+            $pdf->SetXY(0, $pos_y);
+            $pdf->Cell(297, 10, $last_nama, 0, 0, 'C');
             
             try {
                 $temp_pdf = sys_get_temp_dir() . '/Sertifikat_Kuesioner_' . mt_rand() . '.pdf';
@@ -352,6 +352,7 @@ if ($is_bulk_print || $is_single_print || $is_send_email || $is_bulk_send_email)
 
                 $mail = \SLiMS\Mail::getInstance();
                 $mail->clearAllRecipients();
+                $mail->clearAttachments();
                 $mail->addAddress($last_email, $last_nama);
                 $mail->Subject = 'Sertifikat Apresiasi Kuesioner Perpustakaan';
                 $mail->Body = $mail_msg;
@@ -381,6 +382,31 @@ if ($is_bulk_print || $is_single_print || $is_send_email || $is_bulk_send_email)
         exit;
     }
 }
+
+/* RECORD OPERATION */
+if (isset($_POST['saveData'])) {
+    if (!($can_read AND $can_write)) die();
+    $sql_op = new simbio_dbop($dbs);
+    
+    $data['npm'] = $dbs->escape_string(trim($_POST['npm']));
+    $data['nama'] = $dbs->escape_string(trim($_POST['nama']));
+    $data['email'] = $dbs->escape_string(trim($_POST['email']));
+    
+    if (isset($_POST['updateRecordID'])) {
+        $updateRecordID = (integer)$_POST['updateRecordID'];
+        $update = $sql_op->update('kuesioner', $data, 'id='.$updateRecordID);
+        if ($update) {
+            toastr(__('Data Sertifikat Berhasil Diperbarui'))->success();
+        } else {
+            toastr(__('Gagal memperbarui data: ') . $sql_op->error)->error();
+        }
+    }
+    
+    $qs = preg_replace('/&?action=[^&]*/', '', $_POST['lastQueryStr'] ?? '');
+    echo '<script language="Javascript">parent.jQuery(\'#mainContent\').simbioAJAX(\''.$_SERVER['PHP_SELF'].'?'.$qs.'\');</script>';
+    exit();
+}
+
 
 /* DATA DELETION PROCESS */
 if (isset($_POST['itemID']) AND !empty($_POST['itemID']) AND isset($_POST['itemAction'])) {
@@ -431,126 +457,173 @@ $page_title = 'Laporan Kuesioner';
 <?php
 /* main content */
 
-// create datagrid
-$datagrid = new simbio_datagrid();
+if (isset($_POST['detail']) OR (isset($_GET['action']) AND $_GET['action'] == 'detail')) {
+    if (!($can_read AND $can_write)) {
+        die('<div class="errorBox">'.__('You don\'t have enough privileges to view this section').'</div>');
+    }
+    /* RECORD FORM */
+    $itemID = (integer)(isset($_POST['itemID']) ? $_POST['itemID'] : (isset($_GET['itemID']) ? $_GET['itemID'] : 0));
+    $rec_q = $dbs->query('SELECT * FROM kuesioner WHERE id='.$itemID);
+    $rec_d = $rec_q->fetch_assoc();
 
-$table_spec = 'kuesioner';
+    $qs = preg_replace('/&?action=[^&]*/', '', $_SERVER['QUERY_STRING'] ?? '');
+    // create new instance
+    $form = new simbio_form_table_AJAX('mainForm', $_SERVER['PHP_SELF'].'?'.$qs, 'post');
+    $form->submit_button_attr = 'name="saveData" value="'.__('Save').'" class="s-btn btn btn-primary"';
 
-$datagrid->setSQLColumn('id',
-    'created_at AS \'' . __('Tanggal Dikirim') . '\'',
-    'npm AS \'' . __('NPM / Identitas') . '\'',
-    'nama AS \'' . __('Nama Lengkap') . '\'',
-    'email AS \'' . __('Email') . '\'',
-    'pertanyaan AS \'' . __('Detail Jawaban') . '\'',
-    'id AS \'Aksi\'');
+    // form table attributes
+    $form->table_attr = 'id="dataList" class="s-table table"';
+    $form->table_header_attr = 'class="alterCell font-weight-bold" style="width:20%;"';
+    $form->table_content_attr = 'class="alterCell2"';
 
-if (!function_exists('showJawaban')) {
-    function showJawaban($db, $data) {
-        $json = $data[5] ?? '';
-        $arr = json_decode($json, true) ?? [];
-        $out = '<ul style="margin:0; padding-left:15px; font-size:12px;">';
-        foreach($arr as $j) {
-            $t = htmlspecialchars($j['pertanyaan'] ?? '');
-            $a = htmlspecialchars($j['jawaban'] ?? '');
-            $out .= "<li><strong>{$t}</strong>: {$a}</li>";
+    if ($rec_q->num_rows > 0) {
+        $form->edit_mode = true;
+        $form->record_id = $itemID;
+        $form->record_title = __('Edit Data Responden Kuesioner');
+        $form->submit_button_attr = 'name="saveData" value="'.__('Update').'" class="s-btn btn btn-primary"';
+    }
+
+    $form->addHidden('lastQueryStr', $qs);
+    $form->addTextField('text', 'npm', __('NPM / Identitas'), $rec_d['npm']??'', 'class="form-control col-4"');
+    $form->addTextField('text', 'nama', __('Nama Lengkap'), $rec_d['nama']??'', 'class="form-control col-6"');
+    $form->addTextField('text', 'email', __('Email'), $rec_d['email']??'', 'class="form-control col-6"');
+    
+    // Display answers as read-only or info
+    $json = $rec_d['pertanyaan'] ?? '';
+    $arr = json_decode($json, true) ?? [];
+    $ans_html = '<div class="alert alert-light border"> <ul style="margin:0; padding-left:15px;">';
+    foreach($arr as $j) {
+        $t = htmlspecialchars($j['pertanyaan'] ?? '');
+        $a = htmlspecialchars($j['jawaban'] ?? '');
+        $ans_html .= "<li><strong>{$t}</strong>: {$a}</li>";
+    }
+    $ans_html .= '</ul></div>';
+    $form->addAnything(__('Jawaban Kuesioner'), $ans_html);
+
+    echo $form->printOut();
+} else {
+    // create datagrid
+    $datagrid = new simbio_datagrid();
+    
+    $table_spec = 'kuesioner';
+    
+    $datagrid->setSQLColumn('id',
+        'created_at AS \'' . __('Tanggal Dikirim') . '\'',
+        'npm AS \'' . __('NPM / Identitas') . '\'',
+        'nama AS \'' . __('Nama Lengkap') . '\'',
+        'email AS \'' . __('Email') . '\'',
+        'pertanyaan AS \'' . __('Detail Jawaban') . '\'',
+        'id AS \'Aksi\'');
+    
+    if (!function_exists('showJawaban')) {
+        function showJawaban($db, $data) {
+            $json = $data[5] ?? '';
+            $arr = json_decode($json, true) ?? [];
+            $out = '<ul style="margin:0; padding-left:15px; font-size:12px;">';
+            foreach($arr as $j) {
+                $t = htmlspecialchars($j['pertanyaan'] ?? '');
+                $a = htmlspecialchars($j['jawaban'] ?? '');
+                $out .= "<li><strong>{$t}</strong>: {$a}</li>";
+            }
+            $out .= '</ul>';
+            return $out;
         }
-        $out .= '</ul>';
-        return $out;
     }
-}
-$datagrid->modifyColumnContent(5, 'callback{showJawaban}');
-
-if (!function_exists('showAksiMenuKuesioner')) {
-    function showAksiMenuKuesioner($db, $data) {
-        $id = $data[0];
-        $qs = preg_replace('/&?action=[^&]*/', '', $_SERVER['QUERY_STRING'] ?? '');
-
-        $html = '<div class="dropdown position-relative" onmouseenter="jQuery(this).find(\'.dropdown-menu\').addClass(\'show\');" onmouseleave="jQuery(this).find(\'.dropdown-menu\').removeClass(\'show\');">';
-        $html .= '<button class="btn btn-sm btn-light border px-3" type="button" id="dropdownMenuButton'.$id.'" style="border-radius: 20px; cursor: pointer;">';
-        $html .= '<i class="fa fa-ellipsis-v text-secondary"></i>';
-        $html .= '</button>';
-        $html .= '<div class="dropdown-menu dropdown-menu-right shadow-sm border-0" aria-labelledby="dropdownMenuButton'.$id.'" style="margin-top: 0px; top: 100%; z-index: 9999;">';
-        $html .= '<a class="dropdown-item py-2" href="#" onclick="if(confirm(\'Kirim sertifikat digital ini secara otomatis via Email kepada responden?\')) { let b=jQuery(this); b.html(\'<i class=\\\'fa fa-spinner fa-spin text-success mr-2\\\'></i> Mengirim...\'); parent.jQuery(\'#mainContent\').simbioAJAX(\''.$_SERVER['PHP_SELF'].'?'.$qs.'\', {method: \'POST\', addData: \'sendSertifikat=true&kues_id='.$id.'&lastQueryStr=\'+encodeURIComponent(\''.$qs.'\')}); } return false;"><i class="fa fa-paper-plane text-success mr-2"></i> Kirim ke Email</a>';
-        $html .= '<a class="dropdown-item py-2" href="'.$_SERVER['PHP_SELF'].'?'.$qs.'&action=print_sertifikat&kues_id='.$id.'" target="_blank"><i class="fa fa-print text-info mr-2"></i> Cetak PDF Sertifikat</a>';
-        $html .= '</div>';
-        $html .= '</div>';
-        return $html;
+    $datagrid->modifyColumnContent(5, 'callback{showJawaban}');
+    
+    if (!function_exists('showAksiMenuKuesioner')) {
+        function showAksiMenuKuesioner($db, $data) {
+            $id = $data[0];
+            $qs = preg_replace('/&?action=[^&]*/', '', $_SERVER['QUERY_STRING'] ?? '');
+    
+            $html = '<div class="dropdown position-relative" onmouseenter="jQuery(this).find(\'.dropdown-menu\').addClass(\'show\');" onmouseleave="jQuery(this).find(\'.dropdown-menu\').removeClass(\'show\');">';
+            $html .= '<button class="btn btn-sm btn-light border px-3" type="button" id="dropdownMenuButton'.$id.'" style="border-radius: 20px; cursor: pointer;">';
+            $html .= '<i class="fa fa-ellipsis-v text-secondary"></i>';
+            $html .= '</button>';
+            $html .= '<div class="dropdown-menu dropdown-menu-right shadow-sm border-0" aria-labelledby="dropdownMenuButton'.$id.'" style="margin-top: 0px; top: 100%; z-index: 9999;">';
+            $html .= '<a class="dropdown-item py-2" href="#" onclick="if(confirm(\'Kirim sertifikat digital ini secara otomatis via Email kepada responden?\')) { let b=jQuery(this); b.html(\'<i class=\\\'fa fa-spinner fa-spin text-success mr-2\\\'></i> Mengirim...\'); parent.jQuery(\'#mainContent\').simbioAJAX(\''.$_SERVER['PHP_SELF'].'?'.$qs.'\', {method: \'POST\', addData: \'sendSertifikat=true&kues_id='.$id.'&lastQueryStr=\'+encodeURIComponent(\''.$qs.'\')}); } return false;"><i class="fa fa-paper-plane text-success mr-2"></i> Kirim ke Email</a>';
+            $html .= '<a class="dropdown-item py-2" href="'.$_SERVER['PHP_SELF'].'?'.$qs.'&action=print_sertifikat&kues_id='.$id.'" target="_blank"><i class="fa fa-print text-info mr-2"></i> Cetak PDF Sertifikat</a>';
+            $html .= '</div>';
+            $html .= '</div>';
+            return $html;
+        }
     }
-}
-$datagrid->modifyColumnContent(6, 'callback{showAksiMenuKuesioner}');
-
-$datagrid->setSQLorder('created_at DESC');
-
-// is there any search
-$criteria = "npm != 'setting'";
-if (isset($_GET['keywords']) AND $_GET['keywords']) {
-   $keywords = $dbs->escape_string($_GET['keywords']);
-   $criteria .= " AND (npm LIKE '%$keywords%' OR nama LIKE '%$keywords%' OR email LIKE '%$keywords%' OR pertanyaan LIKE '%$keywords%')";
-}
-$datagrid->setSQLCriteria($criteria);
-
-// set table and table header attributes
-$datagrid->table_attr = 'id="dataList" class="s-table table table-sm"';
-$datagrid->table_header_attr = 'class="dataListHeader" style="font-weight: bold;"';
-$qs = preg_replace('/&?action=[^&]*/', '', $_SERVER['QUERY_STRING'] ?? '');
-$datagrid->chbox_form_URL = $_SERVER['PHP_SELF'] . '?' . $qs;
-
-// put the result into variables
-$recs = isset($_GET['recs']) ? (int)$_GET['recs'] : 20;
-if ($recs <= 0) $recs = 20;
-$datagrid_result = $datagrid->createDataGrid($dbs, $table_spec, $recs, ($can_read AND $can_write));
-
-if (isset($_GET['keywords']) AND $_GET['keywords']) {
-    $msg = str_replace('{result->num_rows}', $datagrid->num_rows, __('Found <strong>{result->num_rows}</strong> from your keywords'));
-    echo '<div class="infoBox">'.$msg.' : "'.htmlentities($_GET['keywords']).'"</div>';
-}
-
-echo '<div class="table-responsive" style="min-height: 400px; padding-bottom: 20px;">';
-echo $datagrid_result;
-echo '</div>';
-?>
-<script type="text/javascript">
-jQuery(document).ready(function($) {
-    if ($('.uncheck-all').length > 0) {
-        var btnDownloadHtml = '<input type="button" value="Download Sertifikat" class="s-btn btn btn-primary ml-2 btn-bulk-download" />';
-        var btnEmailHtml = '<input type="button" value="Kirim Email Massal" class="s-btn btn btn-success ml-2 btn-bulk-email" />';
-        
-        
-        $('.uncheck-all').after(btnEmailHtml).after(btnDownloadHtml); 
-        
-        $('.btn-bulk-download').click(function() {
-            var selected = [];
-            $('input[name="itemID[]"]:checked').each(function() {
-                selected.push($(this).val());
-            });
-            if (selected.length == 0) {
-                alert('Centang terlebih dahulu baris partisipan / responden dari tabel sebelum mendownload tipe bulk!');
-                return;
-            }
-            var qs = "<?php echo addslashes($qs); ?>";
-            var actionUrl = "<?php echo $_SERVER['PHP_SELF']; ?>?action=bulk_print_sertifikat&" + qs + "&kues_ids=" + selected.join(',');
+    $datagrid->modifyColumnContent(6, 'callback{showAksiMenuKuesioner}');
+    
+    $datagrid->setSQLorder('created_at DESC');
+    
+    // is there any search
+    $criteria = "npm != 'setting'";
+    if (isset($_GET['keywords']) AND $_GET['keywords']) {
+       $keywords = $dbs->escape_string($_GET['keywords']);
+       $criteria .= " AND (npm LIKE '%$keywords%' OR nama LIKE '%$keywords%' OR email LIKE '%$keywords%' OR pertanyaan LIKE '%$keywords%')";
+    }
+    $datagrid->setSQLCriteria($criteria);
+    
+    // set table and table header attributes
+    $datagrid->table_attr = 'id="dataList" class="s-table table table-sm"';
+    $datagrid->table_header_attr = 'class="dataListHeader" style="font-weight: bold;"';
+    $qs = preg_replace('/&?action=[^&]*/', '', $_SERVER['QUERY_STRING'] ?? '');
+    $datagrid->chbox_form_URL = $_SERVER['PHP_SELF'] . '?' . $qs;
+    
+    // put the result into variables
+    $recs = isset($_GET['recs']) ? (int)$_GET['recs'] : 20;
+    if ($recs <= 0) $recs = 20;
+    $datagrid_result = $datagrid->createDataGrid($dbs, $table_spec, $recs, ($can_read AND $can_write));
+    
+    if (isset($_GET['keywords']) AND $_GET['keywords']) {
+        $msg = str_replace('{result->num_rows}', $datagrid->num_rows, __('Found <strong>{result->num_rows}</strong> from your keywords'));
+        echo '<div class="infoBox">'.$msg.' : "'.htmlentities($_GET['keywords']).'"</div>';
+    }
+    
+    echo '<div class="table-responsive" style="min-height: 400px; padding-bottom: 20px;">';
+    echo $datagrid_result;
+    echo '</div>';
+    ?>
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        if ($('.uncheck-all').length > 0) {
+            var btnDownloadHtml = '<input type="button" value="Download Sertifikat" class="s-btn btn btn-primary ml-2 btn-bulk-download" />';
+            var btnEmailHtml = '<input type="button" value="Kirim Email Massal" class="s-btn btn btn-success ml-2 btn-bulk-email" />';
             
-            window.open(actionUrl, '_blank');
-        });
-        
-        $('.btn-bulk-email').click(function() {
-            var selected = [];
-            $('input[name="itemID[]"]:checked').each(function() {
-                selected.push($(this).val());
-            });
-            if (selected.length == 0) {
-                alert('Centang terlebih dahulu baris tabel sebelum mengirim email massal!');
-                return;
-            }
-            if(confirm('Teruskan otomatis Sertifikat Digital ke ' + selected.length + ' responden terpilih via Email? (Proses ini mungkin memerlukan waktu beberapa saat)')) {
-                $('.btn-bulk-email').val('Sedang mengirim...').prop('disabled', true);
-                var qs = "<?php echo addslashes($qs); ?>";
-                parent.jQuery('#mainContent').simbioAJAX('<?php echo $_SERVER['PHP_SELF']; ?>?' + qs, {
-                    method: 'POST', 
-                    addData: 'sendBulkSertifikat=true&kues_ids=' + selected.join(',') + '&lastQueryStr=' + encodeURIComponent(qs)
+            
+            $('.uncheck-all').after(btnEmailHtml).after(btnDownloadHtml); 
+            
+            $('.btn-bulk-download').click(function() {
+                var selected = [];
+                $('input[name="itemID[]"]:checked').each(function() {
+                    selected.push($(this).val());
                 });
-            }
-        });
-    }
-});
-</script>
+                if (selected.length == 0) {
+                    alert('Centang terlebih dahulu baris partisipan / responden dari tabel sebelum mendownload tipe bulk!');
+                    return;
+                }
+                var qs = "<?php echo addslashes($qs); ?>";
+                var actionUrl = "<?php echo $_SERVER['PHP_SELF']; ?>?action=bulk_print_sertifikat&" + qs + "&kues_ids=" + selected.join(',');
+                
+                window.open(actionUrl, '_blank');
+            });
+            
+            $('.btn-bulk-email').click(function() {
+                var selected = [];
+                $('input[name="itemID[]"]:checked').each(function() {
+                    selected.push($(this).val());
+                });
+                if (selected.length == 0) {
+                    alert('Centang terlebih dahulu baris tabel sebelum mengirim email massal!');
+                    return;
+                }
+                if(confirm('Teruskan otomatis Sertifikat Digital ke ' + selected.length + ' responden terpilih via Email? (Proses ini mungkin memerlukan waktu beberapa saat)')) {
+                    $('.btn-bulk-email').val('Sedang mengirim...').prop('disabled', true);
+                    var qs = "<?php echo addslashes($qs); ?>";
+                    parent.jQuery('#mainContent').simbioAJAX('<?php echo $_SERVER['PHP_SELF']; ?>?' + qs, {
+                        method: 'POST', 
+                        addData: 'sendBulkSertifikat=true&kues_ids=' + selected.join(',') + '&lastQueryStr=' + encodeURIComponent(qs)
+                    });
+                }
+            });
+        }
+    });
+    </script>
+    <?php
+}
