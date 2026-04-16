@@ -7,14 +7,13 @@ require_once SIMBIO.'simbio_GUI/table/simbio_table.inc.php';
 require_once SIMBIO.'simbio_GUI/form_maker/simbio_form_table_AJAX.inc.php';
 
 $db = DB::getInstance();
-
-
 // Ambil data pengaturan saat ini dari table kuesioner untuk mendapatkan flyer yg sudah ada
 $stmt = $db->query("SELECT * FROM kuesioner WHERE npm = 'setting' LIMIT 1");
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $current_judul = $row['judul'] ?? '';
 $current_flyer = $row['flyer'] ?? '';
+$asset_url = SWB . 'plugins/' . basename(dirname(__DIR__)) . '/assets/';
 $current_template_sertifikat = $row['template_sertifikat'] ?? '';
 $config_sertifikat_raw = $row['config_sertifikat'] ?? '{}';
 $config_sertifikat = json_decode($config_sertifikat_raw, true) ?? [];
@@ -82,7 +81,7 @@ if (isset($_POST['simpan_setting'])) {
     $valid_mime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     
     // Logic untuk mekanisme Upload Flyer
-    $flyer_filename = $current_flyer; // retain default/old
+    $flyer_filename = $_POST['flyer_select'] ?? $current_flyer; 
     if (isset($_POST['hapus_flyer']) && $_POST['hapus_flyer'] == '1') {
         $flyer_filename = '';
     }
@@ -101,7 +100,7 @@ if (isset($_POST['simpan_setting'])) {
     }
     
     // Logic untuk mekanisme Upload Template Sertifikat
-    $template_sertifikat_filename = $current_template_sertifikat; // retain default/old
+    $template_sertifikat_filename = $_POST['template_sertifikat_select'] ?? $current_template_sertifikat;
     if (isset($_POST['hapus_template_sertifikat']) && $_POST['hapus_template_sertifikat'] == '1') {
         $template_sertifikat_filename = '';
     }
@@ -226,29 +225,65 @@ $form->table_content_attr = 'class="alterCell2"';
 // Form Element: Judul
 $form->addTextField('text', 'judul_kuesioner', __('Judul Kuesioner').'*', $current_judul, ' required class="form-control col-6"');
 
-// Form Element: Flyer Upload
+// Form Element: Flyer List & Upload
 $str_flyer = '<div class="mb-2">';
-if (!empty($current_flyer)) {
-    $str_flyer .= '<div class="mb-3"><img src="'.SWB.'plugins/kuesioner_sertifikat_generator/assets/'.htmlspecialchars($current_flyer).'" style="max-height:150px; border-radius:5px; border:2px solid #ddd;" /></div>';
-    $str_flyer .= '<div class="mb-3"><label><input type="checkbox" name="hapus_flyer" value="1"> Hapus Flyer Saat Ini</label></div>';
+$str_flyer .= '<div class="input-group col-10 p-0 mb-3">';
+$str_flyer .= '<div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fa fa-picture-o"></i></span></div>';
+$str_flyer .= '<select name="flyer_select" class="form-control" onchange="if(this.value) { $(\'#preview_img_flyer\').attr(\'src\', \''.$asset_url.'\' + this.value).show(); } else { $(\'#preview_img_flyer\').hide(); }">';
+$str_flyer .= '<option value="">-- Pilih Flyer Dari Assets --</option>';
+
+$asset_dir = __DIR__ . '/../assets/';
+if (is_dir($asset_dir)) {
+    $files = scandir($asset_dir);
+    foreach ($files as $file) {
+        if (strpos($file, 'flyer_') === 0) {
+            $sel = ($current_flyer == $file) ? 'selected' : '';
+            $str_flyer .= '<option value="' . $file . '" ' . $sel . '>' . $file . '</option>';
+        }
+    }
 }
-$str_flyer .= '<input type="file" name="flyer" class="form-control col-6" accept="image/jpeg, image/png, image/gif, image/webp">';
+$str_flyer .= '</select></div>';
+
+// Preview Image Area
+$img_disp_flyer = !empty($current_flyer) ? 'block' : 'none';
+$str_flyer .= '<div class="mb-3"><img id="preview_img_flyer" src="'.$asset_url.htmlspecialchars($current_flyer ?? '').'" style="display:'.$img_disp_flyer.'; max-height:150px; border-radius:5px; border:2px solid #ddd;" /></div>';
+
+$str_flyer .= '<div class="mb-2"><strong>Atau Unggah Flyer Baru:</strong></div>';
+$str_flyer .= '<input type="file" name="flyer" class="form-control col-10 mb-2" accept="image/jpeg, image/png, image/gif, image/webp">';
 $str_flyer .= '<small class="form-text text-muted">Format yang didukung: JPG, PNG, GIF, WEBP</small>';
 $str_flyer .= '</div>';
 $form->addAnything(__('Gambar Flyer Banner'), $str_flyer);
 
 // Form Element: Certificate Upload & Config
+// Form Element: Certificate List & Upload
 $str_sert = '<div class="mb-2">';
-if (!empty($current_template_sertifikat)) {
-    $str_sert .= '<div class="mb-3"><img src="'.SWB.'plugins/kuesioner_sertifikat_generator/assets/'.htmlspecialchars($current_template_sertifikat).'" style="max-height:150px; border-radius:5px; border:2px solid #ddd;" /></div>';
-    $str_sert .= '<div class="mb-3"><label><input type="checkbox" name="hapus_template_sertifikat" value="1"> Hapus Template Saat Ini</label></div>';
+$str_sert .= '<div class="input-group col-10 p-0 mb-3">';
+$str_sert .= '<div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fa fa-image"></i></span></div>';
+$str_sert .= '<select name="template_sertifikat_select" class="form-control" onchange="if(this.value) { $(\'#preview_img_sert\').attr(\'src\', \''.$asset_url.'\' + this.value).show(); } else { $(\'#preview_img_sert\').hide(); }">';
+$str_sert .= '<option value="">-- Pilih Template Dari Assets --</option>';
+
+$asset_dir = __DIR__ . '/../assets/';
+if (is_dir($asset_dir)) {
+    $files = scandir($asset_dir);
+    foreach ($files as $file) {
+        if (strpos($file, 'sertifikat_') === 0) {
+            $sel = ($current_template_sertifikat == $file) ? 'selected' : '';
+            $str_sert .= '<option value="' . $file . '" ' . $sel . '>' . $file . '</option>';
+        }
+    }
 }
-$str_sert .= '<div class="input-group col-10 p-0">';
-$str_sert .= '<input type="file" name="template_sertifikat" class="form-control" accept="image/jpeg, image/png, image/webp">';
+$str_sert .= '</select>';
 $str_sert .= '<div class="input-group-append">';
 $str_sert .= '<a href="'.$_SERVER['PHP_SELF'].'?'.$_SERVER['QUERY_STRING'].'&action=preview_cert" target="_blank" class="btn btn-info" title="Lihat Preview PDF"><i class="fa fa-file-pdf-o"></i> Preview PDF</a>';
 $str_sert .= '</div>';
 $str_sert .= '</div>';
+
+// Preview Image Area
+$img_display = !empty($current_template_sertifikat) ? 'block' : 'none';
+$str_sert .= '<div class="mb-3"><img id="preview_img_sert" src="'.$asset_url.htmlspecialchars($current_template_sertifikat).'" style="display:'.$img_display.'; max-height:150px; border-radius:5px; border:2px solid #ddd;" /></div>';
+
+$str_sert .= '<div class="mb-2"><strong>Atau Unggah Template Baru:</strong></div>';
+$str_sert .= '<input type="file" name="template_sertifikat" class="form-control col-10 mb-2" accept="image/jpeg, image/png, image/webp">';
 $str_sert .= '<small class="form-text text-muted">Format yang didukung: JPG, PNG, WEBP (Ukuran A4 Landscape direkomendasikan)</small>';
 $str_sert .= '</div>';
 
