@@ -9,6 +9,7 @@ $setting_row = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $kuesioner_judul = $setting_row['judul'] ?? 'Kuesioner Pengunjung';
 $kuesioner_flyer = $setting_row['flyer'] ?? '';
+$asset_url = SWB . 'plugins/' . basename(dirname(__DIR__)) . '/assets/';
 $daftar_pertanyaan = [];
 if ($setting_row && !empty($setting_row['pertanyaan'])) {
     $daftar_pertanyaan = json_decode($setting_row['pertanyaan'], true) ?? [];
@@ -64,7 +65,7 @@ if (isset($_POST['simpan'])) {
 <?php if (!empty($kuesioner_flyer)): ?>
 <div class="container-fluid p-0 mb-4">
     <div class="w-100 shadow-sm border-bottom text-center mb-4" style="max-height: 400px; overflow: hidden;">
-        <img src="<?= SWB ?>plugins/kuesioner_sertifikat_generator/assets/<?= htmlspecialchars($kuesioner_flyer ?? '') ?>" alt="Flyer Kuesioner" class="img-fluid w-100" style="object-fit: cover; object-position: center;">
+        <img src="<?= $asset_url ?><?= htmlspecialchars($kuesioner_flyer ?? '') ?>" alt="Flyer Kuesioner" class="img-fluid w-100" style="object-fit: cover; object-position: center;">
     </div>
 </div>
 <?php endif; ?>
